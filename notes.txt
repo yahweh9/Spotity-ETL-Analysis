@@ -1,0 +1,246 @@
+https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset/data
+
+# 1. Drop the unnecessary 'Unnamed: 0' column
+df = df.drop(columns=['Unnamed: 0'])
+
+# Preview shows the first few rows of the dataset
+df.head()
+
+# Structure, data types, and non-null counts 
+df.info()
+
+# Summary stats
+df.describe()
+
+# Column names
+print(df.columns)
+
+
+# 2. Create a filter that looks for missing (null) values in the 'artists' column
+missing_rows = df[df['artists'].isnull() | df['album_name'].isnull() | df['track_name'].isnull()]
+
+# Print the rows with missing values in the 'artists' column
+print(missing_rows)
+
+# 3. Find all rows that share the exact same artist and track name
+# 'keep=False' tells Python: "Show me EVERY copy, don't hide the original!"
+all_clones = df_clean[df_clean.duplicated(subset=['artists', 'track_name'], keep=False)]
+
+# Sort them alphabetically by artist and track name so the clones sit right next to each other
+all_clones = all_clones.sort_values(['artists', 'track_name'])
+
+# The dataset is too wide to read easily in the terminal, so let's just print the columns that explain the mystery
+columns_to_view = ['artists', 'track_name', 'album_name', 'track_genre', 'popularity']
+print(all_clones[columns_to_view].head(20))
+
+
+
+Transform "T" in ETL process
+# 1. Feature Engineering: Create a readable 'duration_min' column
+df_clean['duration_min'] = df['duration_ms'] / 60000
+
+# 2. Sanity Checks: Look for impossible values
+impossible_tempo = df_clean[df_clean['tempo'] == 0]
+impossible_duration = df_clean[df_clean['duration_min'] == 0]
+
+print(f"Songs with 0 BPM tempo: {len(impossible_tempo)}")
+print(f"Songs with 0 duration: {len(impossible_duration)}")
+
+# Let's peek at the final, transformed data!
+print(df_clean[['artists', 'track_name', 'duration_min', 'tempo']].head())
+
+
+# The "Load" Step: Save the clean data to a new file
+# index=False prevents Pandas from adding a new, useless 'Unnamed: 0' column again!
+df_clean.to_csv('data/cleaned_spotify_tracks.csv', index=False)
+
+print("ETL Pipeline Complete: Clean data saved successfully!")
+
+
+First analysis correlation heatmaps
+
+# 1. Select only the numerical audio features for correlation analysis
+numerical_columns = [
+    'popularity', 'duration_min', 'danceability', 'energy', 
+    'loudness', 'speechiness', 'acousticness', 
+    'instrumentalness', 'liveness', 'valence', 'tempo'
+]
+
+# 2. Compute the correlation matrix
+correlation_matrix = df[numerical_columns].corr()
+
+# 3. Set up a large canvas so its easy to read
+plt.figure(figsize=(12, 8))
+
+# 4. Draw the heatmap using seaborn
+sns.heatmap(correlation_matrix, 
+            annot=True,             # writes the actual numbers inside the coloured boxes
+            cmap='coolwarm',        # color theme: blue for negative, red for positive
+            fmt=".2f",              # rounds the number to 2 decimal places
+            linewidths=0.5,         # adds a tiny white border between the boxes
+            vmin=-1, vmax=1         # set the range of the color scale from -1 to 1
+)
+
+# 5. Add titlte and show the plot
+plt.title("Correlation Heatmap of Spotify Audio Features", fontsize=16)
+plt.tight_layout()                  # ensures the labels dont get clipped
+plt.show()
+
+
+Ignore the diagonal red line in the middle, it is 
+
+Dark Red (1.0) Strong positive relationships
+Dark Blue (-1.0) Strong negative relationships
+White/Grey (0) no mathematical relationships
+
+
+Strong positive relationships:
+ - loudness and energy -- 0.76 
+ - danceability and valence --0.48
+
+Strong negative relationships:
+ - energy and acousticness -- -0.76
+ - loudness and acousticness -- -0.59
+ - loudness and instrumentalness -- -0.43
+
+
+
+3 Main Takeaways from this Heatmap
+
+1) The strongest correlation is Loudness and Energy a very positive relation of 0.76
+
+2) The acoustic trade off, there is a massive negative correlation between energy and acousticness (-0.76)
+
+3) Correlation between valence( happiness) and danceability, songs that are more danceable are generally more positive and upbeat
+
+
+Plot twist, there is no concrete correlation between popularity and any of the other categories.
+This shows that is no formula to create a hit song, popularity is likely driven by categories outside of the dataset, eg. artist fame, TikTok trends
+or playlist placements
+
+
+
+# 1. Select the features that are measured on a 0.0 to 1.0 scale
+features = ['danceability', 'energy', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence']
+
+# 2. Group the data by genre and calculate the average for each feature
+genre_averages = df.groupby('track_genre')[features].mean()
+
+# 3. Pick three very different genres to compare
+genres_to_compare = ['classical', 'heavy-metal', 'hip-hop', 'k-pop', 'pop']
+data_to_plot = genre_averages.loc[genres_to_compare]
+
+# 4. Math setup to draw a circle (Radar charts use polar coordinates)
+angles = np.linspace(0, 2 * np.pi, len(features), endpoint=False).tolist()
+angles += angles[:1]  # Close the circle
+
+# 5. Set up the canvas
+fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+# 6. Draw a shape for each genre
+colors = ['#1db954', '#e91429', '#1a1a1a', '#ff6b6b', '#4ecdc4'] # Spotify Green, Red, and Black
+
+for idx, (genre, color) in enumerate(zip(genres_to_compare, colors)):
+    values = data_to_plot.loc[genre].tolist()
+    values += values[:1]  # Close the circle
+    
+    # Plot the outline and fill it in
+    ax.plot(angles, values, color=color, linewidth=2, label=genre.title())
+    ax.fill(angles, values, color=color, alpha=0.15)
+
+# 7. Add the labels and formatting
+ax.set_theta_offset(np.pi / 2) # Put the first label at the very top
+ax.set_theta_direction(-1)     # Go clockwise
+ax.set_thetagrids(np.degrees(angles[:-1]), features, fontsize=11)
+
+# Set the scale from 0 to 1 so it matches the data perfectly
+ax.set_ylim(0, 1)
+
+plt.title('Audio Signature Comparison by Genre', y=1.08, fontsize=16)
+plt.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+plt.tight_layout()
+plt.show()
+
+
+The Outlier: Classical will spike heavily toward the bottom (acousticness and instrumentalness), completely avoiding the energy and danceability zones where the other four live.
+
+The "Twin" Genres: Look closely at pop and k-pop. Their shapes will likely be almost identical (high energy, high danceability, high valence), proving mathematically that they share the exact same musical DNA, just in different languages.
+
+The Anger vs. Groove: Heavy-metal will stretch to the absolute limit of energy but score very low on danceability and valence (happiness). Hip-hop, meanwhile, will dominate danceability and speechiness.
+
+------------------------------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+
+# Load your clean dataset
+df_clean = pd.read_csv('data/cleaned_spotify_tracks.csv')
+
+features_to_use = [
+    'danceability', 'energy', 'loudness', 'speechiness', 
+    'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo'
+]
+
+print("--- STARTING OFFLINE PIPELINE ---")
+
+# 1. Scale the Data
+print("1. Scaling features...")
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(df_clean[features_to_use])
+
+# 2. Apply PCA (Principal Component Analysis)
+# We are compressing 9 features into 4 "Super Features" to remove noise
+print("2. Running PCA...")
+pca = PCA(n_components=4, random_state=42)
+pca_features = pca.fit_transform(scaled_features)
+
+# Calculate how much of the original "story" we kept (Variance)
+variance_kept = sum(pca.explained_variance_ratio_) * 100
+print(f"   -> PCA compressed 9 features into 4, keeping {variance_kept:.1f}% of the original variance!")
+
+# 3. Apply KMeans Clustering
+# Let's group the 113,000 songs into 15 distinct "Vibe Clusters"
+print("3. Running KMeans Clustering (Grouping into 15 Vibes)...")
+# n_init=10 ensures the algorithm runs a few times to find the absolute best center points
+kmeans = KMeans(n_clusters=15, random_state=42, n_init=10)
+kmeans.fit(pca_features)
+
+# 4. Save the results back to our dataframe
+df_clean['cluster_id'] = kmeans.labels_
+
+print("--- OFFLINE PIPELINE COMPLETE ---\n")
+
+# Let's peek at the distribution to see how many songs ended up in each cluster
+print("Cluster Population Breakdown:")
+print(df_clean['cluster_id'].value_counts().sort_index())
+
+print("\n--- CRACKING OPEN THE CLUSTERS ---")
+
+# We only want to look at the features that are easy for humans to understand
+human_features = ['danceability', 'energy', 'acousticness', 'valence', 'tempo']
+
+# Calculate the average (mean) of every feature for each cluster
+cluster_averages = df_clean.groupby('cluster_id')[human_features].mean()
+
+# Loop through all 15 clusters to print their "Profile"
+for cluster_num in range(15):
+    print(f"🔍 CLUSTER {cluster_num}")
+    
+    # 1. Get the average stats for this specific cluster
+    stats = cluster_averages.loc[cluster_num]
+    
+    # 2. Find the top 3 most common genres in this cluster
+    top_genres = df_clean[df_clean['cluster_id'] == cluster_num]['track_genre'].value_counts().head(3).index.tolist()
+    
+    # 3. Find 3 highly popular songs as examples
+    top_songs = df_clean[df_clean['cluster_id'] == cluster_num].sort_values(by='popularity', ascending=False).drop_duplicates('track_name').head(3)
+    combined_names = top_songs['track_name'] + " (by " + top_songs['artists'] + ")"
+    song_names = combined_names.tolist()
+
+    # Print the profile!
+    print(f"   Vibe:   Energy: {stats['energy']:.2f} | Dance: {stats['danceability']:.2f} | Acoustic: {stats['acousticness']:.2f} | Happiness: {stats['valence']:.2f}")
+    print(f"   Genres: {', '.join(top_genres).title()}")
+    print(f"   Tracks: {', '.join(song_names)}")
+    print("-" * 50)
